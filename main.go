@@ -95,7 +95,7 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	quit := make(chan struct{})
 	go func() {
 		defer wg.Done()
@@ -215,7 +215,7 @@ func createRoutines(count int) {
 			for {
 				select {
 				case element := <-elements:
-					removeFromS3Single(element)
+					removeFromS3SingleByCommand(element)
 					deletedFilesCount++
 					printProgress(false)
 				case array := <-elementsMultiple:
