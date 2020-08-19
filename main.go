@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,8 +42,13 @@ var awsSvc = func() *s3.S3 {
 		Region:           aws.String("us-east-1"),
 		Endpoint:         aws.String(args.Endpoint),
 		EndpointResolver: endpoints.ResolverFunc(endpointResolver),
+		DisableSSL:       aws.Bool(true),
+		S3ForcePathStyle: aws.Bool(true),
 	})
 	return s3.New(session)
+	// client.Handlers.Sign.Swap(v4.SignRequestHandler.Name, func(req *request.Request) {
+	// 	// TODO custom signing logic.
+	//  })
 }()
 
 var outputPointer *csv.Writer
@@ -89,7 +95,7 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	quit := make(chan struct{})
 	go func() {
 		defer wg.Done()
@@ -204,6 +210,7 @@ func readFile(filepath string, separator string) {
 
 func createRoutines(count int) {
 	for i := 0; i < count; i++ {
+		time.Sleep(1 * time.Second)
 		go func() {
 			for {
 				select {
@@ -232,6 +239,18 @@ func printProgress(end bool) {
 		seconds := time.Since(start).Seconds()
 		fmt.Printf("Mean velocity: %v f/s -- Deleted: %v files \n", math.Round(float64(deletedFilesCount)/seconds), deletedFilesCount)
 	}
+}
+
+func removeFromS3SingleByCommand(element Row) {
+	coargs := []string{"s3", "rm", "s3://" + element.Bucket + "/" + element.PreviewID, "--endpoint-url", args.Endpoint}
+	out, err := exec.Command("aws", coargs...).Output()
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		// fmt.Printf("Pointer: %v \n", outputPointer)
+		outputPointer.Write(element.toArray())
+		return
+	}
+	fmt.Println("Success: " + string(out))
 }
 
 func removeFromS3Single(element Row) {
