@@ -51,8 +51,8 @@ var awsSvc = func() *s3.S3 {
 	//  })
 }()
 
-var outputPointer *csv.Writer
-var outputFile *os.File
+var outputPointer csv.Writer
+var outputFile os.File
 
 // Row is used to save the csv format
 type Row struct {
@@ -87,9 +87,8 @@ func main() {
 	fmt.Printf("Arguments founds: { Path: %v, Endpoint: %v, Routines: %v, Pivot: %v, RemoteMultiple: %v , OutputPath: %v } \n", args.FilePath, args.Endpoint, args.GoRoutines, args.ProgressPivot, args.RemoveMultiple, args.OutputPath)
 
 	outputPointer, outputFile := getOutputWriter()
-	defer closeOutputWriter(outputPointer, outputFile)
 
-	createRoutines(args.GoRoutines)
+	createRoutines(args.GoRoutines, outputPointer)
 	readFile(args.FilePath, ",")
 
 	var wg sync.WaitGroup
@@ -110,6 +109,7 @@ func main() {
 				}
 			case <-quit:
 				ticker.Stop()
+				closeOutputWriter(outputPointer, outputFile)
 				return
 			}
 		}
@@ -208,14 +208,14 @@ func readFile(filepath string, separator string) {
 	fmt.Println("Ending reading file")
 }
 
-func createRoutines(count int) {
+func createRoutines(count int, outputPointer *csv.Writer) {
 	for i := 0; i < count; i++ {
 		time.Sleep(1 * time.Second)
 		go func() {
 			for {
 				select {
 				case element := <-elements:
-					removeFromS3SingleByCommand(element)
+					removeFromS3SingleByCommand(element, outputPointer)
 					deletedFilesCount++
 					printProgress(false)
 				case array := <-elementsMultiple:
@@ -241,13 +241,13 @@ func printProgress(end bool) {
 	}
 }
 
-func removeFromS3SingleByCommand(element Row) {
+func removeFromS3SingleByCommand(element Row, outputPointer *csv.Writer) {
 	coargs := []string{"s3", "rm", "s3://" + element.Bucket + "/" + element.PreviewID, "--endpoint-url", args.Endpoint}
 	out, err := exec.Command("aws", coargs...).Output()
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
-		// fmt.Printf("Pointer: %v \n", outputPointer)
 		outputPointer.Write(element.toArray())
+		outputPointer.Flush()
 		return
 	}
 	fmt.Println("Success: " + string(out))
@@ -315,7 +315,7 @@ func removeFromS3Multiple(rows []Row, bucket string) {
 }
 
 func getOutputWriter() (*csv.Writer, *os.File) {
-	csvfile, err := os.Create(args.OutputPath)
+	csvfile, err := os.OpenFile(args.OutputPath, os.O_CREATE|os.O_WRONLY, 0777)
 
 	if err != nil {
 		fmt.Printf("Failed creating file: %s \n", err)
