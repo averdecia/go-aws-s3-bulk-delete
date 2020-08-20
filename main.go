@@ -22,7 +22,9 @@ import (
 
 var elements = make(chan Row)
 var elementsMultiple = make(chan []Row)
+var filesCount = 0
 var deletedFilesCount = 0
+var failedFilesCount = 0
 var deletedFilesLastCheckBySeconds = 0
 var args = getArgs()
 var start = time.Now()
@@ -101,11 +103,11 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				if deletedFilesCount == deletedFilesLastCheckBySeconds {
+				if filesCount == deletedFilesLastCheckBySeconds {
 					printProgress(true)
 					close(quit)
 				} else {
-					deletedFilesLastCheckBySeconds = deletedFilesCount
+					deletedFilesLastCheckBySeconds = filesCount
 				}
 			case <-quit:
 				ticker.Stop()
@@ -216,12 +218,12 @@ func createRoutines(count int, outputPointer *csv.Writer) {
 				select {
 				case element := <-elements:
 					removeFromS3SingleByCommand(element, outputPointer)
-					deletedFilesCount++
+					filesCount++
 					printProgress(false)
 				case array := <-elementsMultiple:
 					if len(array) > 0 {
 						removeFromS3Multiple(array, array[0].Bucket)
-						deletedFilesCount += len(array)
+						filesCount += len(array)
 					}
 				}
 			}
@@ -235,9 +237,9 @@ func deleteFromS3(element Row) {
 }
 
 func printProgress(end bool) {
-	if args.RemoveMultiple != 0 || end || (args.RemoveMultiple == 0 && deletedFilesCount%args.ProgressPivot == 0) {
+	if args.RemoveMultiple != 0 || end || (args.RemoveMultiple == 0 && filesCount%args.ProgressPivot == 0) {
 		seconds := time.Since(start).Seconds()
-		fmt.Printf("Mean velocity: %v f/s -- Deleted: %v files \n", math.Round(float64(deletedFilesCount)/seconds), deletedFilesCount)
+		fmt.Printf("Mean velocity: %v f/s -- Index: %v files -- Deleted: %v files -- Failed: %v files \n", math.Round(float64(filesCount)/seconds), filesCount, deletedFilesCount, failedFilesCount)
 	}
 }
 
@@ -246,10 +248,12 @@ func removeFromS3SingleByCommand(element Row, outputPointer *csv.Writer) {
 	out, err := exec.Command("aws", coargs...).Output()
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
+		failedFilesCount++
 		outputPointer.Write(element.toArray())
 		outputPointer.Flush()
 		return
 	}
+	deletedFilesCount++
 	fmt.Println("Success: " + string(out))
 }
 
@@ -271,11 +275,14 @@ func removeFromS3Single(element Row) {
 			// Message from an error.
 			fmt.Println(err.Error())
 		}
+
+		failedFilesCount++
 		outputPointer.Write(element.toArray())
+		outputPointer.Flush()
 		fmt.Printf("Object not removed: %v\n", element.PreviewID)
 		return
 	}
-
+	deletedFilesCount++
 	//fmt.Printf("Object succesfully removed: %v\n", element.PreviewID)
 }
 
